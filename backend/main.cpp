@@ -92,6 +92,92 @@ int main() {
                 title, target);
         },
         {drogon::Post});
+        
+        // 모금 참여: POST /rooms/{방번호}/contributions
+    drogon::app().registerHandler(
+        "/rooms/{1}/contributions",
+        [](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback,
+           int roomId) {
+            // 1) 받은 JSON 검사
+            auto json = req->getJsonObject();
+            if (!json || !(*json)["nickname"].isString() ||
+                (*json)["nickname"].asString().empty() ||
+                !(*json)["amount"].isInt() ||
+                (*json)["amount"].asInt() <= 0) {
+                Json::Value err;
+                err["error"] = "nickname(글자)와 amount(0보다 큰 정수)가 필요해요";
+                auto resp = drogon::HttpResponse::newHttpJsonResponse(err);
+                resp->setStatusCode(drogon::k400BadRequest);
+                callback(resp);
+                return;
+            }
+
+            std::string nickname = (*json)["nickname"].asString();
+            int amount = (*json)["amount"].asInt();
+
+            // 2) "목표를 안 넘을 때만 더하고, 영수증도 같이 저장" (SQL 한 문장)
+            auto db = drogon::app().getDbClient();
+            db->execSqlAsync(
+                R"(WITH upd AS (
+                       UPDATE rooms
+                       SET collected_amount = collected_amount + $2::int
+                       WHERE id = $1::int
+                         AND collected_amount + $2::int <= target_amount
+                       RETURNING id, collected_amount, target_amount
+                   ),
+                   ins AS (
+                       INSERT INTO contributions (room_id, nickname, amount)
+                       SELECT id, $3, $2::int FROM upd
+                   )
+                   SELECT collected_amount, target_amount FROM upd)",
+                [callback, db, roomId](const drogon::orm::Result &r) {
+                    if (!r.empty()) {
+                        // 성공: 현재 모금 현황을 돌려줌
+                        Json::Value out;
+                        out["collected"] = r[0]["collected_amount"].as<int>();
+                        out["target"] = r[0]["target_amount"].as<int>();
+                        auto resp = drogon::HttpResponse::newHttpJsonResponse(out);
+                        resp->setStatusCode(drogon::k201Created);
+                        callback(resp);
+                        return;
+                    }
+                    // 실패: 방이 없는 건지, 금액이 넘치는 건지 확인
+                    db->execSqlAsync(
+                        "SELECT target_amount - collected_amount AS remaining "
+                        "FROM rooms WHERE id = $1::int",
+                        [callback](const drogon::orm::Result &r2) {
+                            Json::Value out;
+                            auto resp = drogon::HttpResponse::newHttpResponse();
+                            if (r2.empty()) {
+                                out["error"] = "없는 모금방이에요";
+                                resp = drogon::HttpResponse::newHttpJsonResponse(out);
+                                resp->setStatusCode(drogon::k404NotFound);
+                            } else {
+                                out["error"] = "목표 금액을 넘어요";
+                                out["remaining"] = r2[0]["remaining"].as<int>();
+                                resp = drogon::HttpResponse::newHttpJsonResponse(out);
+                                resp->setStatusCode(drogon::k409Conflict);
+                            }
+                            callback(resp);
+                        },
+                        [callback](const drogon::orm::DrogonDbException &) {
+                            auto resp = drogon::HttpResponse::newHttpResponse();
+                            resp->setStatusCode(drogon::k503ServiceUnavailable);
+                            resp->setBody("db error");
+                            callback(resp);
+                        },
+                        roomId);
+                },
+                [callback](const drogon::orm::DrogonDbException &) {
+                    auto resp = drogon::HttpResponse::newHttpResponse();
+                    resp->setStatusCode(drogon::k503ServiceUnavailable);
+                    resp->setBody("db error");
+                    callback(resp);
+                },
+                roomId, amount, nickname);
+        },
+        {drogon::Post});
 
     drogon::app().addListener("0.0.0.0", 8080).run();
     return 0;
