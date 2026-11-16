@@ -26,7 +26,7 @@ int main() {
         getEnv("POSTGRES_DB"),
         getEnv("POSTGRES_USER"),
         getEnv("POSTGRES_PASSWORD"),
-        1);
+        10);
 
     // DB까지 살아 있는지 확인 (새로 추가)
     drogon::app().registerHandler(
@@ -92,7 +92,7 @@ int main() {
                 title, target);
         },
         {drogon::Post});
-        
+
         // 모금 참여: POST /rooms/{방번호}/contributions
     drogon::app().registerHandler(
         "/rooms/{1}/contributions",
