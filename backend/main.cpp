@@ -240,6 +240,10 @@ int main() {
         },
         {drogon::Get});
 
+    // 웹 화면: /app/www 폴더의 HTML 파일을 그대로 내려줌
+    drogon::app().setDocumentRoot("/app/www");
+    drogon::app().setStaticFilesCacheTime(0);
+
     drogon::app().addListener("0.0.0.0", 8080).run();
     return 0;
 }
