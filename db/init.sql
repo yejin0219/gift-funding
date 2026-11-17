@@ -16,3 +16,11 @@ CREATE TABLE contributions (
     amount     INTEGER NOT NULL CHECK (amount > 0),         -- 낸 금액 (0원보다 커야 함)
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()           -- 낸 시간 (자동 기록)
 );
+
+-- 회원 표: 카카오 로그인한 사람 한 명당 한 줄
+CREATE TABLE users (
+    id         SERIAL PRIMARY KEY,                       -- 우리 서비스의 회원 번호
+    kakao_id   BIGINT NOT NULL UNIQUE,                   -- 카카오 회원번호 (같은 사람은 한 줄만)
+    nickname   TEXT NOT NULL,                            -- 화면에 보여줄 이름
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()        -- 가입한 시간
+);

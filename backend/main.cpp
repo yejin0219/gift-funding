@@ -240,6 +240,40 @@ int main() {
         },
         {drogon::Get});
 
+        // 카카오 로그인 시작: GET /auth/kakao/login
+    drogon::app().registerHandler(
+        "/auth/kakao/login",
+        [](const drogon::HttpRequestPtr &,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            std::string clientId = getEnv("KAKAO_REST_API_KEY");
+            std::string redirectUri = getEnv("KAKAO_REDIRECT_URI");
+            if (clientId.empty() || redirectUri.empty()) {
+                auto resp = drogon::HttpResponse::newHttpResponse();
+                resp->setStatusCode(drogon::k500InternalServerError);
+                resp->setBody("kakao config missing");
+                callback(resp);
+                return;
+            }
+
+            // 번호표(state) 만들기
+            std::string state = drogon::utils::getUuid();
+
+            std::string url = "https://kauth.kakao.com/oauth/authorize"
+                              "?response_type=code"
+                              "&client_id=" + drogon::utils::urlEncode(clientId) +
+                              "&redirect_uri=" + drogon::utils::urlEncode(redirectUri) +
+                              "&state=" + state;
+
+            auto resp = drogon::HttpResponse::newRedirectionResponse(url);
+            drogon::Cookie cookie("oauth_state", state);
+            cookie.setHttpOnly(true);   // 화면의 JavaScript는 이 쿠키를 못 읽음
+            cookie.setPath("/");
+            cookie.setMaxAge(300);      // 5분 뒤 만료
+            resp->addCookie(cookie);
+            callback(resp);
+        },
+        {drogon::Get});
+
     // 웹 화면: /app/www 폴더의 HTML 파일을 그대로 내려줌
     drogon::app().setDocumentRoot("/app/www");
     drogon::app().setStaticFilesCacheTime(0);
