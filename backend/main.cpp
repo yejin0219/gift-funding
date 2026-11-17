@@ -179,6 +179,67 @@ int main() {
         },
         {drogon::Post});
 
+        // 모금방 조회: GET /rooms/{방번호}
+    drogon::app().registerHandler(
+        "/rooms/{1}",
+        [](const drogon::HttpRequestPtr &,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback,
+           int roomId) {
+            auto db = drogon::app().getDbClient();
+
+            // DB 오류가 나면 쓸 공통 처리
+            auto onError = [callback](const drogon::orm::DrogonDbException &) {
+                auto resp = drogon::HttpResponse::newHttpResponse();
+                resp->setStatusCode(drogon::k503ServiceUnavailable);
+                resp->setBody("db error");
+                callback(resp);
+            };
+
+            // 1단계: 방 정보 가져오기
+            db->execSqlAsync(
+                "SELECT title, target_amount, collected_amount "
+                "FROM rooms WHERE id = $1::int",
+                [callback, db, roomId, onError](const drogon::orm::Result &r) {
+                    if (r.empty()) {
+                        Json::Value err;
+                        err["error"] = "없는 모금방이에요";
+                        auto resp = drogon::HttpResponse::newHttpJsonResponse(err);
+                        resp->setStatusCode(drogon::k404NotFound);
+                        callback(resp);
+                        return;
+                    }
+                    std::string title = r[0]["title"].as<std::string>();
+                    int target = r[0]["target_amount"].as<int>();
+                    int collected = r[0]["collected_amount"].as<int>();
+
+                    // 2단계: 이 방의 영수증 목록 가져오기
+                    db->execSqlAsync(
+                        "SELECT nickname, amount FROM contributions "
+                        "WHERE room_id = $1::int ORDER BY id",
+                        [callback, roomId, title, target, collected](
+                            const drogon::orm::Result &r2) {
+                            Json::Value out;
+                            out["id"] = roomId;
+                            out["title"] = title;
+                            out["target"] = target;
+                            out["collected"] = collected;
+
+                            Json::Value list(Json::arrayValue);
+                            for (const auto &row : r2) {
+                                Json::Value item;
+                                item["nickname"] = row["nickname"].as<std::string>();
+                                item["amount"] = row["amount"].as<int>();
+                                list.append(item);
+                            }
+                            out["contributions"] = list;
+                            callback(drogon::HttpResponse::newHttpJsonResponse(out));
+                        },
+                        onError, roomId);
+                },
+                onError, roomId);
+        },
+        {drogon::Get});
+
     drogon::app().addListener("0.0.0.0", 8080).run();
     return 0;
 }
